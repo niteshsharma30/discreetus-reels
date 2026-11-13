@@ -44,7 +44,7 @@ class Settings:
 
     # Writing: Google Gemini API free tier (aistudio.google.com/apikey, no card needed)
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    gemini_model: str = os.getenv("GEMINI_MODEL") or "gemini-flash-latest"
+    gemini_model: str = os.getenv("GEMINI_MODEL") or "gemini-3.8-flash"   # falls back to older ones (writer.py)
 
     # reel = animated video (media_reels.py), card = still image (media_cards.py)
     post_format: str = (os.getenv("DAILY_FORMAT") or "reel").strip().lower()

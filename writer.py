@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 import requests
 
@@ -122,33 +123,56 @@ Topics already posted, pick something clearly different:
     return post
 
 
+# Tried in order. Newer models are sometimes overloaded or closed to new accounts, so fall back.
+FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+
+
 def _ask(system: str, user: str) -> dict:
     user += "\n\nReply with JSON only, in exactly this shape:\n" + json.dumps(POST_SCHEMA)
-    try:
-        r = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{SETTINGS.gemini_model}:generateContent",
-            headers={"x-goog-api-key": SETTINGS.gemini_api_key, "content-type": "application/json"},
-            json={"systemInstruction": {"parts": [{"text": system}]},
-                  "contents": [{"role": "user", "parts": [{"text": user}]}],
-                  "generationConfig": {"responseMimeType": "application/json"}},
-            timeout=120,
-        )
-    except requests.RequestException as e:
-        raise RuntimeError(f"Couldn't reach the Gemini API (network problem): {e}")
-    if r.status_code in (400, 403) and "API key" in r.text:
-        raise ConfigError("GEMINI_API_KEY was rejected; create a new key at aistudio.google.com/apikey")
-    if r.status_code == 404:
-        raise ConfigError(f"Gemini model '{SETTINGS.gemini_model}' not found; set GEMINI_MODEL to a current one")
-    if r.status_code == 429:
-        raise RuntimeError("Gemini free-tier limit reached; the next run will try again")
-    if r.status_code >= 400:
-        raise RuntimeError(f"Gemini error {r.status_code}: {r.text[:300]}")
+    body = {"systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": {"responseMimeType": "application/json"}}
+    models = list(dict.fromkeys([SETTINGS.gemini_model, *FALLBACK_MODELS]))
+    problems = []
+    for model in models:
+        for attempt in (1, 2):
+            try:
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    headers={"x-goog-api-key": SETTINGS.gemini_api_key, "content-type": "application/json"},
+                    json=body, timeout=90,
+                )
+            except requests.RequestException as e:
+                problems.append(f"{model}: {type(e).__name__}")
+                continue                                   # timeout or network blip: retry once
+            if r.status_code in (400, 401, 403) and "API key" in r.text:
+                raise ConfigError("GEMINI_API_KEY was rejected; create a new key at aistudio.google.com/apikey")
+            if r.status_code in (500, 502, 503, 504):      # Google is busy: wait, retry once, then next model
+                problems.append(f"{model}: busy ({r.status_code})")
+                if attempt == 1:
+                    time.sleep(15)
+                continue
+            if r.status_code in (404, 429):                # model unavailable or its free quota used up
+                problems.append(f"{model}: {_message(r)}")
+                break
+            if r.status_code >= 400:
+                raise RuntimeError(f"Gemini error {r.status_code} on {model}: {_message(r)}")
 
-    candidate = (r.json().get("candidates") or [{}])[0]
-    if candidate.get("finishReason") in ("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"):
-        raise RuntimeError("Gemini declined to write today's post (safety filter). Nothing is posted.")
-    text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        raise ValueError(f"Gemini did not return JSON: {text[:200]}")
-    return json.loads(match.group(0))
+            candidate = (r.json().get("candidates") or [{}])[0]
+            if candidate.get("finishReason") in ("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"):
+                raise RuntimeError("Gemini declined to write today's post (safety filter). Nothing is posted.")
+            text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))
+            match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+            if not match:
+                problems.append(f"{model}: reply was not JSON")
+                continue
+            print(f"  (written by {model})")
+            return json.loads(match.group(0))
+    raise RuntimeError("No Gemini model could write today's post: " + "; ".join(problems))
+
+
+def _message(r) -> str:
+    try:
+        return r.json()["error"]["message"][:160]
+    except Exception:
+        return r.text[:160]
