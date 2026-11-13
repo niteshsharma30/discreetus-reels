@@ -37,28 +37,24 @@ To try another day, delete today's row from `data/posts.csv` and its file from `
 | Fonts | Cormorant Garamond and Inter in `fonts/` (SIL Open Font License, free for commercial use) |
 | Hosting | A `media` branch of your GitHub repo, served by the free jsDelivr CDN. The repo must be **public** |
 | Scheduler | GitHub Actions (`.github/workflows/daily-instagram.yml`), unlimited free minutes on public repos |
-| Posting | Instagram API with Instagram Login (free, no Facebook Page needed) |
+| Posting | Meta Graph API with a system-user token (free, doesn't expire, no Facebook Page needed) |
 
 ## Going live
 
-### 1. Instagram access (about 15 minutes, no Facebook Page needed)
-This uses the **Instagram API with Instagram Login**. You still create the app on Meta's developer site,
-but nothing is linked to Facebook.
-1. In the Instagram app: **Settings → Account type and tools → Switch to professional account** → **Business**
-   (Creator also works).
-2. At **developers.facebook.com → My Apps → Create app**. When asked what the app should do, choose the
-   **Instagram** use case (*Manage messaging & content on Instagram*).
-3. In the app, open **Instagram → API setup with Instagram business login**.
-4. Under **Generate access tokens**, click **Add account**, log in to your Instagram account and allow access.
-   If asked, add the account as an **Instagram tester** first (App roles → Roles) and accept the invite in
-   Instagram: **Settings → Website permissions → Apps and websites → Tester invites**.
-5. Click **Generate token** next to the account and copy it → `IG_ACCESS_TOKEN`.
-   It needs the permissions `instagram_business_basic` and `instagram_business_content_publish`.
-6. Check it: `curl "https://graph.instagram.com/me?fields=user_id,username&access_token=TOKEN"` should print your username.
-   (`IG_USER_ID` is optional; the code looks it up from the token.)
-
-The token lasts **60 days**. The GitHub workflow renews it every day if you add the `SECRETS_TOKEN` secret
-(step 3 below); otherwise generate a new one before it runs out.
+### 1. Instagram access (about 20 minutes, no Facebook Page needed)
+You need a personal Facebook login for Meta's developer site, but nothing is posted to Facebook and no
+Facebook Page is linked.
+1. In the Instagram app: **Settings → Account type and tools → Switch to professional account → Business**.
+2. Sign in at **developers.facebook.com** (complete "Confirm Account" if asked) → **My Apps → Create app** →
+   use case **Manage messaging & content on Instagram** → create.
+3. **Use cases → Customize → API setup with Unified login.** If asked, create and select a **business portfolio**
+   (free; it is not a Facebook Page).
+4. **App roles → Roles → Add People → Instagram Tester** → your Instagram username. Accept the invite on
+   instagram.com: **Settings → Apps and websites → Tester invites**.
+5. **1. Configure your app → Create new configuration**: access token *System-user access token*, expiration
+   *Never*, asset = your Instagram account, keep `instagram_basic` and `instagram_content_publish`. Select it.
+6. **2. Generate access tokens → Add account** → log in → note the number under the username → `IG_USER_ID`.
+7. **Generate token** → copy → `IG_ACCESS_TOKEN`. It doesn't expire.
 
 ### 2. Gemini API key (free)
 1. Go to **aistudio.google.com/apikey** and sign in with a Google account.
@@ -67,15 +63,11 @@ The token lasts **60 days**. The GitHub workflow renews it every day if you add 
 ### 3. Put it on GitHub
 1. Push this folder to a **public** GitHub repo. `.env` and `media/` are git-ignored, so your keys are never uploaded.
 2. In the repo, open **Settings → Secrets and variables → Actions** and add these secrets:
-   `GEMINI_API_KEY`, `IG_ACCESS_TOKEN`, `WAITLIST_URL`, `BRAND_NAME`.
+   `GEMINI_API_KEY`, `IG_ACCESS_TOKEN`, `IG_USER_ID`, `WAITLIST_URL`, `BRAND_NAME`.
    Leave `DRY_RUN` out for now.
-3. **Automatic token renewal** (recommended): on GitHub, open your profile picture → **Settings → Developer settings
-   → Personal access tokens → Fine-grained tokens → Generate new token**. Choose **Only select repositories** → this repo,
-   and under **Repository permissions** set **Secrets** to **Read and write**. Save it as a repo secret named
-   `SECRETS_TOKEN`. The workflow then renews `IG_ACCESS_TOKEN` every day.
-4. Open **Actions → daily-instagram → Run workflow**. It runs as a dry run. Read the log, and download the video
+3. Open **Actions → daily-instagram → Run workflow**. It runs as a dry run. Read the log, and download the video
    from the `media` branch to watch it.
-5. Add the secret `DRY_RUN` = `false` and run it again. The Reel is posted. From then on it runs every day at 19:00 IST
+4. Add the secret `DRY_RUN` = `false` and run it again. The Reel is posted. From then on it runs every day at 19:00 IST
    (change the `cron` line in the workflow; it's in UTC).
 
 ## Changing things
@@ -92,9 +84,8 @@ The token lasts **60 days**. The GitHub workflow renews it every day if you add 
 
 | Message | Meaning | Fix |
 | --- | --- | --- |
-| `IG_ACCESS_TOKEN is invalid or expired` | The 60-day token ran out or was revoked | Generate a new one (Instagram access, step 5) and update the secret |
+| `IG_ACCESS_TOKEN is invalid or was revoked` | The token was deleted or the app lost access | Generate a new one (Instagram access, step 7) and update the secret |
 | `code 10` or `code 200` | Missing permission | Make sure `instagram_business_content_publish` is granted, then generate a new token |
-| `Token not renewed` | The token is under 24 hours old, or `SECRETS_TOKEN` is wrong | Nothing to do if it's new; otherwise check the `SECRETS_TOKEN` permissions |
 | `could not process the media (ERROR)` | Instagram couldn't download or read the video | Check the repo is public and the `media` branch has the file |
 | `Gemini free-tier limit reached` | Google's daily limit | It runs again the next day, or press "Run workflow" later |
 | `Gemini declined to write today's post` | Gemini's safety filter blocked the reply | Nothing posts that day; it tries again tomorrow |
@@ -104,11 +95,11 @@ The token lasts **60 days**. The GitHub workflow renews it every day if you add 
 
 | File | Job |
 | --- | --- |
-| `daily.py` | The commands: `prepare`, `publish`, `status`, `refresh-token`. Start reading here |
+| `daily.py` | The commands: `prepare`, `publish`, `status`. Start reading here |
 | `writer.py` | The Gemini prompt, the safety rules and the policy check |
 | `media_reels.py` | Renders the Reel (video and soundtrack) |
 | `media_cards.py` | Still-image alternative |
-| `instagram.py` | The Instagram API calls, token renewal and dry-run logging |
+| `instagram.py` | The Instagram API calls, with dry-run logging |
 | `config.py` | Settings from `.env` |
 | `prompts/instagram_prompt.md` | Your creative direction |
 | `data/posts.csv` | Every post: date, script, caption, status, Instagram ID |

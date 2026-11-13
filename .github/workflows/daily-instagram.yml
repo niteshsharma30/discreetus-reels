@@ -35,6 +35,7 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       DAILY_FORMAT: ${{ secrets.DAILY_FORMAT }}               # missing = reel
       IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,26 +73,6 @@ jobs:
 
       - name: Publish to Instagram
         run: python daily.py publish
-
-      # Instagram tokens last 60 days. This swaps today's token for a fresh one and saves it back into
-      # the IG_ACCESS_TOKEN secret, so it never expires. It needs a secret named SECRETS_TOKEN: a GitHub
-      # fine-grained token for this repo with "Secrets: Read and write" (see README). Without it, this
-      # step is skipped and you renew the token by hand every ~50 days.
-      - name: Renew the Instagram token
-        if: always()
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.SECRETS_TOKEN }}
-        run: |
-          if [ -z "$GH_TOKEN" ] || [ -z "$IG_ACCESS_TOKEN" ] || [ "$DRY_RUN" != "false" ]; then
-            echo "Skipped (needs SECRETS_TOKEN and IG_ACCESS_TOKEN secrets, and DRY_RUN=false)."; exit 0
-          fi
-          file="$RUNNER_TEMP/ig_token"
-          python daily.py refresh-token --out "$file"
-          echo "::add-mask::$(cat "$file")"
-          gh secret set IG_ACCESS_TOKEN --repo "$GITHUB_REPOSITORY" < "$file"
-          rm -f "$file"
-          echo "Saved the renewed token to the IG_ACCESS_TOKEN secret."
 
       - name: Save the post record
         if: always()

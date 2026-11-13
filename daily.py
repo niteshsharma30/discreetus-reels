@@ -3,7 +3,6 @@
     python daily.py prepare    # AI writes today's post and the Reel is rendered into media/
     python daily.py publish    # posts today's Reel to Instagram
     python daily.py status     # what has been posted
-    python daily.py refresh-token --out FILE   # renew the 60-day Instagram token (used by the workflow)
 
 Every post is recorded in data/posts.csv (opens in Excel or Google Sheets).
 DRY_RUN=true (the default) sends nothing; data/requests.jsonl shows the calls it would make.
@@ -122,27 +121,12 @@ def cmd_status(_args) -> None:
         print(f"{r['date']}  {r['status']:<9} {r['motif']:<11} {r['topic'][:50]}  {r['notes'][:40]}")
 
 
-def cmd_refresh_token(args) -> None:
-    """Write a fresh 60-day token to a file (never to the screen: workflow logs are public)."""
-    if not args.out:
-        sys.exit("Give --out FILE; the new token is written there, not printed")
-    try:
-        token, seconds = instagram.refresh_token()
-    except Exception as e:
-        sys.exit(f"Token not renewed: {e}")
-    with open(args.out, "w", encoding="utf-8") as f:
-        f.write(token)
-    print(f"Token renewed; valid for {seconds // 86400} more days.")
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description="Daily Instagram Reel")
-    p.add_argument("command", choices=["prepare", "publish", "status", "refresh-token"])
-    p.add_argument("--out", help="refresh-token: file to write the new token to")
+    p.add_argument("command", choices=["prepare", "publish", "status"])
     args = p.parse_args()
     print(f"[{'DRY RUN, nothing is sent' if SETTINGS.dry_run else 'LIVE'}]")
-    {"prepare": cmd_prepare, "publish": cmd_publish, "status": cmd_status,
-     "refresh-token": cmd_refresh_token}[args.command](args)
+    {"prepare": cmd_prepare, "publish": cmd_publish, "status": cmd_status}[args.command](args)
 
 
 if __name__ == "__main__":

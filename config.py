@@ -51,11 +51,11 @@ class Settings:
     # Public folder URL Instagram downloads media from. The GitHub workflow sets it for you.
     media_base_url: str = os.getenv("MEDIA_BASE_URL", "")
 
-    # Instagram Business or Creator account, through the Instagram API with Instagram Login.
-    # No Facebook Page needed. The user ID is looked up from the token when left empty.
+    # Instagram Business or Creator account. A system-user token from "API setup with Unified login"
+    # (doesn't expire) and the account's ID. No Facebook Page needed.
     ig_access_token: str = os.getenv("IG_ACCESS_TOKEN", "")
     ig_user_id: str = os.getenv("IG_USER_ID", "")
-    ig_api_version: str = os.getenv("IG_API_VERSION", "")      # empty = Instagram's default version
+    graph_api_version: str = os.getenv("GRAPH_API_VERSION", "")   # empty = your app's default version
 
 
 SETTINGS = Settings()
