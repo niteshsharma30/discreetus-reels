@@ -1,0 +1,100 @@
+# One cinematic Instagram Reel a day, for free, with no server.
+#
+# 1. `prepare` writes the post (Gemini free tier + prompts/instagram_prompt.md) and renders the video.
+# 2. The video is pushed to a separate `media` branch (replaced each day, so the repo never bloats)
+#    and served through jsDelivr's free CDN, which Instagram can download from.
+#    This needs a PUBLIC repo. Public repos also get unlimited free Actions minutes.
+#    Your keys stay private in Settings > Secrets and variables > Actions; .env is never committed.
+# 3. `publish` sends it to Instagram (Instagram keeps its own copy once it is posted).
+#
+# Change the time with the cron line (it is in UTC: 13:30 UTC = 19:00 India time).
+# GitHub often starts scheduled runs 5-20 minutes late. "Run workflow" on the Actions tab runs it now.
+name: daily-instagram
+
+on:
+  schedule:
+    - cron: "30 13 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-instagram     # never two runs at once, so a post cannot go out twice
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DRY_RUN: ${{ secrets.DRY_RUN }}                 # missing = dry run, nothing is sent
+      TIMEZONE: Asia/Kolkata
+      BRAND_NAME: ${{ secrets.BRAND_NAME }}
+      WAITLIST_URL: ${{ secrets.WAITLIST_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      DAILY_FORMAT: ${{ secrets.DAILY_FORMAT }}               # missing = reel
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: git config --global user.name "autopilot" && git config --global user.email "autopilot@users.noreply.github.com"
+
+      - name: Write today's post and render its video
+        run: python daily.py prepare
+
+      - name: Publish the video where Instagram can download it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(media/*)
+          if [ ${#files[@]} -eq 0 ]; then echo "No new media today."; exit 0; fi
+          dir=$(mktemp -d)
+          cp "${files[@]}" "$dir/"
+          cd "$dir"
+          git init -q -b media
+          git add .
+          git commit -qm "media for $(date -u +%F)"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" media
+          base="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@$(git rev-parse HEAD)"
+          echo "MEDIA_BASE_URL=$base" >> "$GITHUB_ENV"
+          for f in *; do
+            for i in $(seq 1 12); do
+              curl -sfI "$base/$f" >/dev/null && echo "Live: $base/$f" && break
+              sleep 10
+            done
+          done
+
+      - name: Publish to Instagram
+        run: python daily.py publish
+
+      # Instagram tokens last 60 days. This swaps today's token for a fresh one and saves it back into
+      # the IG_ACCESS_TOKEN secret, so it never expires. It needs a secret named SECRETS_TOKEN: a GitHub
+      # fine-grained token for this repo with "Secrets: Read and write" (see README). Without it, this
+      # step is skipped and you renew the token by hand every ~50 days.
+      - name: Renew the Instagram token
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SECRETS_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ] || [ -z "$IG_ACCESS_TOKEN" ] || [ "$DRY_RUN" != "false" ]; then
+            echo "Skipped (needs SECRETS_TOKEN and IG_ACCESS_TOKEN secrets, and DRY_RUN=false)."; exit 0
+          fi
+          file="$RUNNER_TEMP/ig_token"
+          python daily.py refresh-token --out "$file"
+          echo "::add-mask::$(cat "$file")"
+          gh secret set IG_ACCESS_TOKEN --repo "$GITHUB_REPOSITORY" < "$file"
+          rm -f "$file"
+          echo "Saved the renewed token to the IG_ACCESS_TOKEN secret."
+
+      - name: Save the post record
+        if: always()
+        run: |
+          git add data/posts.csv 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "daily: Instagram post" && git pull --rebase && git push)

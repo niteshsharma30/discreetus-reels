@@ -1,0 +1,6 @@
+.env
+__pycache__/
+media/
+data/*.tmp
+data/requests.jsonl
+.venv/
